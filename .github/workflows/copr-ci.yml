@@ -1,0 +1,171 @@
+---
+name: CI Copr Call
+
+on:
+  workflow_call:
+    inputs:
+      copr_pr_webhook_token:
+        description: 'Copr PR webhook key. This should not be secret if you want it to work for PRs from forks.'
+        required: true
+        type: string
+      github_org_owner:
+        description: 'GitHub organization owner. This will prevent user forks from triggering the workflow.'
+        required: true
+        type: string
+      copr_ownername:
+        description: 'User or group name.'
+        required: true
+        type: string
+      auto_update_package:
+        description: 'Automatically create/update a package in Copr.'
+        required: false
+        type: boolean
+        default: true
+      job_timeout:
+        description: 'Job timeout in minutes.'
+        required: false
+        type: number
+        default: 60
+    secrets:
+      COPR_BETA_WEBHOOK_TOKEN:
+        description: 'Copr beta webhook token. This should be a secret.'
+        required: true
+      COPR_STABLE_WEBHOOK_TOKEN:
+        description: 'Copr stable webhook token. This should be a secret.'
+        required: true
+      COPR_CLI_CONFIG:
+        description: 'Copr CLI configuration file. See https://copr.fedorainfracloud.org/api'
+        required: true
+
+jobs:
+  package-init:
+    name: Create/update copr package
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      BASE_URL: https://copr.fedorainfracloud.org/api_3
+      OWNERNAME: ${{ inputs.copr_ownername }}
+      PACKAGE_NAME: ${{ github.event.repository.name }}
+      SOURCE_TYPE_TEXT: "custom"
+    steps:
+      - name: Debug inputs
+        run: |
+          echo "inputs:"
+          echo "copr_pr_webhook_token: ${{ inputs.copr_pr_webhook_token }}"
+          echo "github_org_owner: ${{ inputs.github_org_owner }}"
+          echo "copr_ownername: ${{ inputs.copr_ownername }}"
+          echo "auto_update_package: ${{ inputs.auto_update_package }}"
+          echo "job_timeout: ${{ inputs.job_timeout }}"
+
+      - name: Test secrets
+        id: test_secrets
+        if: >
+          github.repository_owner == inputs.github_org_owner &&
+          inputs.auto_update_package == true
+        run: |
+          # return if secrets.COPR_CLI_CONFIG is empty
+          if [ -z "${{ secrets.COPR_CLI_CONFIG }}" ]; then
+            echo "Copr CLI configuration file is empty. Exiting..."
+
+            # if a pull request exit with 0
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "SKIP_REMAINING_JOBS=true" >> $GITHUB_OUTPUT
+            else
+              exit 1
+            fi
+          else
+            mkdir -p ~/.config
+            echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
+          fi
+
+      - name: Install dependencies
+        if: steps.test_secrets.outputs.SKIP_REMAINING_JOBS != 'true'
+        run: |
+          dnf install -y \
+            copr-cli \
+            jq
+
+      - name: create packages
+        if: steps.test_secrets.outputs.SKIP_REMAINING_JOBS != 'true'
+        run: |
+          projects=(
+            "pulls"
+            "beta"
+            "stable"
+          )
+
+          # download the latest copr-ci.sh script
+          curl https://raw.githubusercontent.com/lizardbyte/copr-ci/master/copr-ci.sh > copr-ci.sh
+
+          # set parameters for package creation
+          script="copr-ci.sh"
+          builddeps="git jq python3"
+          resultdir=""
+          chroot="fedora-latest-x86_64"
+
+          for project in "${projects[@]}"; do
+            # check if 404 on get package (package does not exist)
+            url="${BASE_URL}/package?ownername=${OWNERNAME}&projectname=${project}&packagename=${PACKAGE_NAME}"
+            status_code=$(curl --write-out %{http_code} --silent --output /dev/null $url)
+
+            if [[ "$status_code" == 404 ]]; then
+              echo "Creating package for ${project}..."
+              command="add-package-custom"
+            else
+              echo "Editing package for ${project}..."
+              command="edit-package-custom"
+            fi
+
+            copr-cli \
+              ${command} \
+              --script "${script}" \
+              --script-builddeps "${builddeps}" \
+              --script-resultdir "${resultdir}" \
+              --script-chroot "${chroot}" \
+              --name "${PACKAGE_NAME}" \
+              --timeout $((60 * ${{ inputs.job_timeout }})) \
+              ${project}
+
+          done
+
+  build:
+    name: Copr build
+    needs: package-init
+    if: github.repository_owner == inputs.github_org_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.job_timeout }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get properties
+        env:
+          COPR_PR_WH_TOKEN: ${{ inputs.copr_pr_webhook_token }}
+        run: |
+          # package name = repository name
+          package=${{ github.event.repository.name }}
+          copr_base="https://copr.fedorainfracloud.org/webhooks/custom-dir/${{ inputs.copr_ownername }}"
+
+          # release and released type
+          if [ "${{ github.event_name }}" = "release" ]; then
+            if [ "${{ github.event.action }}" = "prereleased" ]; then
+              COPR_PUSH_WEBHOOK="${copr_base}/beta/${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}/${package}/"
+            elif [ "${{ github.event.action }}" = "released" ]; then
+              COPR_PUSH_WEBHOOK="${copr_base}/stable/${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}/${package}/"
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            COPR_PR_WEBHOOK="${copr_base}/pulls:pr:${{ github.event.number }}/${{ env.COPR_PR_WH_TOKEN }}/${package}/"
+          fi
+
+          echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}" >> $GITHUB_ENV
+          echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}" >> $GITHUB_ENV
+
+          echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
+          echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
+
+      - name: Build
+        run: |
+          curl https://raw.githubusercontent.com/praiskup/copr-ci-tooling/main/copr-gh-actions-submit > submit
+
+          # if a PR number is added the script will use the PR webhook, otherwise it will use the push webhook
+          bash submit ${{ github.event.pull_request.number }}
