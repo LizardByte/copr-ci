@@ -38,8 +38,6 @@ jobs:
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs:
-      - call-copr-ci
     runs-on: ubuntu-latest
     steps:
       - name: Setup Release
