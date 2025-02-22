@@ -99,12 +99,11 @@ jobs:
 
           # set parameters for package creation
           script="copr-ci.sh"
-          builddeps="git jq python3"
-          resultdir=""
 
-          # latest is currently failing due to https://github.com/fedora-copr/copr/issues/3631
-          # chroot="fedora-latest-x86_64"
-          chroot="fedora-41-x86_64"
+          # pam is added as a workaround to https://github.com/fedora-copr/copr/issues/3631
+          builddeps="git jq pam python3"
+          resultdir=""
+          chroot="fedora-latest-x86_64"
 
           for project in "${projects[@]}"; do
             # check if 404 on get package (package does not exist)
