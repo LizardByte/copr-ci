@@ -100,8 +100,7 @@ jobs:
           # set parameters for package creation
           script="copr-ci.sh"
 
-          # pam is added as a workaround to https://github.com/fedora-copr/copr/issues/3631
-          builddeps="git jq pam python3"
+          builddeps="git jq python3"
           resultdir=""
           chroot="fedora-latest-x86_64"
 
