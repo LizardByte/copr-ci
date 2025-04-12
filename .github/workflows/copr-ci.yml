@@ -135,6 +135,10 @@ jobs:
     if: github.repository_owner == inputs.github_org_owner
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.job_timeout }}
+    outputs:
+      BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
+      BUILD_CANCEL: ${{ steps.build.outcome == 'cancelled' }}
+      BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -165,8 +169,67 @@ jobs:
           echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
 
       - name: Build
+        id: build
         run: |
-          curl https://raw.githubusercontent.com/praiskup/copr-ci-tooling/main/copr-gh-actions-submit > submit
+          curl https://raw.githubusercontent.com/reenignearcher/copr-ci-tooling/patch-1/copr-gh-actions-submit > submit
+          # curl https://raw.githubusercontent.com/praiskup/copr-ci-tooling/main/copr-gh-actions-submit > submit
 
           # if a PR number is added the script will use the PR webhook, otherwise it will use the push webhook
           bash submit ${{ github.event.pull_request.number }}
+
+  cancel-build:
+    name: Cancel build
+    needs: build
+    if: |
+      always() &&
+      needs.build.outputs.BUILD_CANCEL == 'true'
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    timeout-minutes: ${{ inputs.job_timeout }}
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            copr-cli
+
+      - name: Cancel Copr build
+        run: |
+          if [ -n "${{ secrets.COPR_CLI_CONFIG }}" ]; then
+            mkdir -p ~/.config
+            echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
+
+            copr-cli \
+              cancel \
+              ${{ needs.build.outputs.BUILD_ID }}
+          else
+            echo "Cannot cancel Copr build. No Copr CLI configuration file found. This is likely a PR from a fork."
+            exit 1
+          fi
+
+  download-build:
+    name: Download build
+    needs: build
+    if: needs.build.outputs.BUILD_SUCCESS == 'true'
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    timeout-minutes: ${{ inputs.job_timeout }}
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            copr-cli
+
+      - name: Download build
+        run: |
+          mkdir -p artifacts
+          copr-cli \
+            download-build \
+            --dest ./artifacts \
+            --rpms \
+            ${{ needs.build.outputs.BUILD_ID }}
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fedora-Copr
+          path: artifacts/
