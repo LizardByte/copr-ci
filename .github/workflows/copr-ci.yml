@@ -217,19 +217,26 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y \
-            copr-cli
+            copr-cli \
+            nodejs \
+            zip
 
       - name: Download build
         run: |
           mkdir -p artifacts
           copr-cli \
             download-build \
-            --dest ./artifacts \
+            --dest . \
             --rpms \
             ${{ needs.build.outputs.BUILD_ID }}
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Fedora-Copr
-          path: artifacts/
+      - name: Setup gh actions artifact client
+        uses: lhotari/gh-actions-artifact-client@v2
+
+      - name: Upload artifacts
+        run: |
+          find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
+            name=$(basename "$file")
+            echo "Uploading $name, file: $file"
+            zip - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
+          done
