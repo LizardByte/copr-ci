@@ -1,5 +1,7 @@
 ---
 name: CI Copr Call
+permissions:
+  contents: read
 
 on:
   workflow_call:
@@ -185,7 +187,6 @@ jobs:
       needs.build.outputs.BUILD_CANCEL == 'true'
     runs-on: ubuntu-latest
     container: fedora:latest
-    timeout-minutes: ${{ inputs.job_timeout }}
     steps:
       - name: Install dependencies
         run: |
@@ -208,11 +209,10 @@ jobs:
 
   download-build:
     name: Download build
-    needs: build
     if: needs.build.outputs.BUILD_SUCCESS == 'true'
+    needs: build
     runs-on: ubuntu-latest
     container: fedora:latest
-    timeout-minutes: ${{ inputs.job_timeout }}
     steps:
       - name: Install dependencies
         run: |
