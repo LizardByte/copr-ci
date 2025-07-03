@@ -236,7 +236,7 @@ jobs:
       - name: Upload artifacts
         run: |
           find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
-            name=$(basename "$file")
+            name=build-$(basename "$file")
             echo "Uploading $name, file: $file"
             zip - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
           done
