@@ -28,6 +28,13 @@ on:
         required: false
         type: number
         default: 60
+      download_version:
+        description: |
+          Download an existing build by version number instead of creating a new build.
+          When provided, build and package-init jobs will be skipped.
+          Example: 2025.703.161609
+        required: false
+        type: string
     secrets:
       COPR_BETA_WEBHOOK_TOKEN:
         description: 'Copr beta webhook token. This should be a secret.'
@@ -44,6 +51,7 @@ jobs:
     name: Create/update copr package
     runs-on: ubuntu-latest
     container: fedora:latest
+    if: inputs.download_version == ''
     env:
       BASE_URL: https://copr.fedorainfracloud.org/api_3
       OWNERNAME: ${{ inputs.copr_ownername }}
@@ -58,6 +66,7 @@ jobs:
           echo "copr_ownername: ${{ inputs.copr_ownername }}"
           echo "auto_update_package: ${{ inputs.auto_update_package }}"
           echo "job_timeout: ${{ inputs.job_timeout }}"
+          echo "download_version: ${{ inputs.download_version }}"
 
       - name: Test secrets
         id: test_secrets
@@ -134,7 +143,9 @@ jobs:
   build:
     name: Copr build
     needs: package-init
-    if: github.repository_owner == inputs.github_org_owner
+    if: >-
+      github.repository_owner == inputs.github_org_owner &&
+      inputs.download_version == ''
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.job_timeout }}
     outputs:
@@ -184,7 +195,8 @@ jobs:
     needs: build
     if: |
       always() &&
-      needs.build.outputs.BUILD_CANCEL == 'true'
+      needs.build.outputs.BUILD_CANCEL == 'true' &&
+      inputs.download_version == ''
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
@@ -209,7 +221,12 @@ jobs:
 
   download-build:
     name: Download build
-    if: needs.build.outputs.BUILD_SUCCESS == 'true'
+    if: |
+      always() &&
+      (
+        (needs.build.outputs.BUILD_SUCCESS == 'true' && inputs.download_version == '') ||
+        (inputs.download_version != '')
+      )
     needs: build
     runs-on: ubuntu-latest
     container: fedora:latest
@@ -219,16 +236,121 @@ jobs:
           dnf install -y \
             copr-cli \
             nodejs \
-            zip
+            zip \
+            jq
+
+      - name: Setup Copr CLI config
+        if: inputs.download_version != ''
+        run: |
+          if [ -n "${{ secrets.COPR_CLI_CONFIG }}" ]; then
+            mkdir -p ~/.config
+            echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
+          else
+            echo "Cannot download build. No Copr CLI configuration file found."
+            exit 1
+          fi
+
+      - name: Find and wait for build
+        if: inputs.download_version != ''
+        run: |
+          VERSION="${{ inputs.download_version }}-1"
+          PACKAGE_NAME="${{ github.event.repository.name }}"
+          OWNERNAME="${{ inputs.copr_ownername }}"
+          PROJECT="beta"
+
+          echo "Looking for build with version: ${VERSION}"
+          echo "Searching in project: ${PROJECT}"
+
+          # Find build ID by version
+          BUILD_ID=""
+          echo "Fetching builds from copr-cli..."
+          builds=$(copr-cli list-builds --output-format json "${OWNERNAME}/${PROJECT}")
+
+          echo "Raw builds output (first 1000 chars):"
+          echo "$builds" | head -c 1000
+          echo ""
+          echo "..."
+
+          echo "Number of builds found:"
+          echo "$builds" | jq '. | length'
+
+          echo "Build details for package ${PACKAGE_NAME}:"
+          echo "$builds" | jq --arg package "$PACKAGE_NAME" '
+            .[] | select(.source_package.name == $package) | {
+              id: .id,
+              package_name: .source_package.name,
+              version: .source_package.version,
+              state: .state
+            }
+          '
+
+          echo "Checking for version matches with ${VERSION}:"
+          echo "$builds" | jq --arg version "${VERSION}" --arg package "$PACKAGE_NAME" '
+            .[] | select(.source_package.name == $package) | select(.source_package.version | startswith($version)) | {
+              id: .id,
+              package_name: .source_package.name,
+              version: .source_package.version,
+              matches: true
+            }
+          '
+
+          BUILD_ID=$(echo "$builds" | jq -r --arg version "${VERSION}" --arg package "$PACKAGE_NAME" '
+            .[] | select(.source_package.name == $package and (.source_package.version | startswith($version))) | .id | tostring
+          ' | head -n1)
+
+          echo "Final BUILD_ID result: '${BUILD_ID}'"
+
+          if [ -z "${BUILD_ID}" ] || [ "${BUILD_ID}" = "null" ]; then
+            echo "No build found for version ${VERSION} in project ${PROJECT}"
+            exit 1
+          fi
+
+          echo "Found build ID: ${BUILD_ID}"
+          echo "BUILD_ID=${BUILD_ID}" >> $GITHUB_ENV
+
+          # Wait for build to complete
+          echo "Waiting for build to complete..."
+          while true; do
+            status=$(copr-cli get-build "${BUILD_ID}" --output-format json | jq -r '.state')
+            echo "Build status: $status"
+
+            case "$status" in
+              "succeeded")
+                echo "Build completed successfully"
+                break
+                ;;
+              "failed"|"canceled"|"skipped")
+                echo "Build failed with status: $status"
+                exit 1
+                ;;
+              "running"|"pending"|"starting"|"importing")
+                echo "Build still in progress, waiting 30 seconds..."
+                sleep 30
+                ;;
+              *)
+                echo "Unknown build status: $status"
+                exit 1
+                ;;
+            esac
+          done
 
       - name: Download build
         run: |
+          # Use provided version's build ID or the one from the build job
+          if [ -n "${{ inputs.download_version }}" ]; then
+            BUILD_ID="${BUILD_ID}"
+          else
+            BUILD_ID="${{ needs.build.outputs.BUILD_ID }}"
+          fi
+
+          echo "Downloading build ID: ${BUILD_ID}"
+
           mkdir -p artifacts
           copr-cli \
             download-build \
             --dest . \
             --rpms \
-            ${{ needs.build.outputs.BUILD_ID }}
+            ${BUILD_ID}
 
       - name: Setup gh actions artifact client
         uses: lhotari/gh-actions-artifact-client@v2
