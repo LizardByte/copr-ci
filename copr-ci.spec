@@ -13,6 +13,9 @@ URL: https://app.lizardbyte.dev
 %description
 Sample spec file for testing LizardByte/copr-ci
 
+%prep
+# Nothing to prepare
+
 %build
 echo '#!/bin/sh' > hello-world.sh
 echo 'echo "Hello, World!"' >> hello-world.sh
