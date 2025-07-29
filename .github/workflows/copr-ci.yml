@@ -27,7 +27,7 @@ on:
         description: 'Job timeout in minutes.'
         required: false
         type: number
-        default: 60
+        default: 90
     secrets:
       COPR_BETA_WEBHOOK_TOKEN:
         description: 'Copr beta webhook token. This should be a secret.'
@@ -136,14 +136,27 @@ jobs:
     needs: package-init
     if: github.repository_owner == inputs.github_org_owner
     runs-on: ubuntu-latest
+    container: fedora:latest
     timeout-minutes: ${{ inputs.job_timeout }}
     outputs:
       BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
       BUILD_CANCEL: ${{ steps.build.outcome == 'cancelled' }}
       BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
     steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            copr-cli \
+            git \
+            jq \
+            nodejs \
+            zip
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set git safe directory
+        run: git config --global --add safe.directory '*'
 
       - name: Get properties
         env:
@@ -156,17 +169,22 @@ jobs:
           # release and released type
           if [ "${{ github.event_name }}" = "release" ]; then
             if [ "${{ github.event.action }}" = "prereleased" ]; then
-              COPR_PUSH_WEBHOOK="${copr_base}/beta/${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}/${package}/"
+              BUILD_CHANNEL="beta"
+              COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}/${package}/"
             elif [ "${{ github.event.action }}" = "released" ]; then
-              COPR_PUSH_WEBHOOK="${copr_base}/stable/${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}/${package}/"
+              BUILD_CHANNEL="stable"
+              COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}/${package}/"
             fi
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            COPR_PR_WEBHOOK="${copr_base}/pulls:pr:${{ github.event.number }}/${{ env.COPR_PR_WH_TOKEN }}/${package}/"
+            BUILD_CHANNEL="pulls:pr:${{ github.event.number }}"
+            COPR_PR_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ env.COPR_PR_WH_TOKEN }}/${package}/"
           fi
 
+          echo "BUILD_CHANNEL=${BUILD_CHANNEL}" >> $GITHUB_ENV
           echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}" >> $GITHUB_ENV
           echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}" >> $GITHUB_ENV
 
+          echo "BUILD_CHANNEL=${BUILD_CHANNEL}"
           echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
           echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
 
@@ -179,61 +197,91 @@ jobs:
           # if a PR number is added the script will use the PR webhook, otherwise it will use the push webhook
           bash submit ${{ github.event.pull_request.number }}
 
-  cancel-build:
-    name: Cancel build
-    needs: build
-    if: |
-      always() &&
-      needs.build.outputs.BUILD_CANCEL == 'true'
-    runs-on: ubuntu-latest
-    container: fedora:latest
-    steps:
-      - name: Install dependencies
-        run: |
-          dnf install -y \
-            copr-cli
-
       - name: Cancel Copr build
+        if: >-
+          always() &&
+          steps.build.outcome == 'cancelled' &&
+          github.secret_source
         run: |
-          if [ -n "${{ secrets.COPR_CLI_CONFIG }}" ]; then
-            mkdir -p ~/.config
-            echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
+          mkdir -p ~/.config
+          echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
 
-            copr-cli \
-              cancel \
-              ${{ needs.build.outputs.BUILD_ID }}
-          else
-            echo "Cannot cancel Copr build. No Copr CLI configuration file found. This is likely a PR from a fork."
-            exit 1
+          copr-cli \
+            cancel \
+            ${{ steps.build.outputs.BUILD_ID }}
+
+      - name: Add problem matcher
+        if: >-
+          always() &&
+          steps.build.outcome != 'skipped'
+        run: |
+          if [ -f "${{ github.workspace }}/.github/matchers/copr-ci.json" ]; then
+            echo "::add-matcher::${{ github.workspace }}/.github/matchers/copr-ci.json"
           fi
 
-  download-build:
-    name: Download build
-    if: needs.build.outputs.BUILD_SUCCESS == 'true'
-    needs: build
-    runs-on: ubuntu-latest
-    container: fedora:latest
-    steps:
-      - name: Install dependencies
+      - name: Logs
+        if: >-
+          always() &&
+          steps.build.outcome != 'skipped'
         run: |
-          dnf install -y \
-            copr-cli \
-            nodejs \
-            zip
+          package=${{ github.event.repository.name }}
+          base_url="https://download.copr.fedorainfracloud.org/results/${{ inputs.copr_ownername }}/${BUILD_CHANNEL}"
+          build_id="0${{ steps.build.outputs.BUILD_ID }}"
+
+          # Array of "name|url" pairs
+          logs=(
+            "source_builder|${base_url}/srpm-builds/${build_id}/builder-live.log.gz"
+            "source_backend|${base_url}/srpm-builds/${build_id}/backend.log.gz"
+            "import|https://copr-dist-git.fedorainfracloud.org/per-task-logs/${{ steps.build.outputs.BUILD_ID }}.log"
+          )
+
+          build_url="https://copr.fedorainfracloud.org/api_3/build/${{ steps.build.outputs.BUILD_ID }}"
+          chroots=$(curl -s "${build_url}" | jq -r '.chroots[]')
+
+          for chroot in $chroots; do
+            logs+=("builder_${chroot}|${base_url}/${chroot}/${build_id}-${package}/builder-live.log.gz")
+            logs+=("backend_${chroot}|${base_url}/${chroot}/${build_id}-${package}/backend.log.gz")
+          done
+
+          error=0
+          for entry in "${logs[@]}"; do
+            name="${entry%%|*}"
+            url="${entry#*|}"
+            set +e
+            echo "::group::Logs - ${name}"
+            if [[ "${url}" == *.gz ]]; then
+              curl -fsS --retry 3 "${url}" | gunzip -c
+            else
+              curl -fsS --retry 3 "${url}"
+            fi
+            if [ $? -ne 0 ]; then
+              echo "Failed to download logs from ${url}"
+              error=1
+            fi
+            echo "::endgroup::"
+            set -e
+          done
+
+          exit ${error}
 
       - name: Download build
+        id: download-build
+        if: steps.build.outcome == 'success'
         run: |
           mkdir -p artifacts
           copr-cli \
             download-build \
             --dest . \
             --rpms \
-            ${{ needs.build.outputs.BUILD_ID }}
+            ${{ steps.build.outputs.BUILD_ID }}
 
       - name: Setup gh actions artifact client
+        id: download-build-client
+        if: steps.download-build.outcome == 'success'
         uses: lhotari/gh-actions-artifact-client@v2
 
       - name: Upload artifacts
+        if: steps.download-build-client.outcome == 'success'
         run: |
           find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
             name=build-$(basename "$file")
