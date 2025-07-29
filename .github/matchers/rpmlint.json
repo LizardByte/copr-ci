@@ -1,6 +1,18 @@
 {
   "problemMatcher": [
     {
+      "owner": "rpmlint-generic",
+      "pattern": [
+        {
+          "regexp": "^(error|warning): ([^ ]+) line (\\d+): (.*)$",
+          "severity": 1,
+          "file": 2,
+          "line": 3,
+          "message": 4
+        }
+      ]
+    },
+    {
       "owner": "rpmlint-warning",
       "severity": "warning",
       "pattern": [
