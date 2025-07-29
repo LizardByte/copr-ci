@@ -97,12 +97,18 @@ jobs:
           )
 
           # download the latest copr-ci.sh script
-          curl https://raw.githubusercontent.com/lizardbyte/copr-ci/master/copr-ci.sh > copr-ci.sh
+          if [ "${{ github.repository }}" = "LizardByte/copr-ci" ]; then
+            # use the version from the same ref
+            ref="${{ github.ref }}"  # e.g. refs/heads/master
+          else
+            ref="master"  # default to master branch
+          fi
+          curl https://raw.githubusercontent.com/lizardbyte/copr-ci/${ref}/copr-ci.sh > copr-ci.sh
 
           # set parameters for package creation
           script="copr-ci.sh"
 
-          builddeps="git jq python3"
+          builddeps="git jq python3 rpmlint"
           resultdir=""
           chroot="fedora-latest-x86_64"
 
@@ -210,11 +216,25 @@ jobs:
             cancel \
             ${{ steps.build.outputs.BUILD_ID }}
 
-      - name: Add problem matcher
+      - name: Add problem matchers
         if: >-
           always() &&
           steps.build.outcome != 'skipped'
         run: |
+          # add default matchers
+          # download the latest rpmlint.json matcher
+          if [ "${{ github.repository }}" = "LizardByte/copr-ci" ]; then
+            # use the version from the same ref
+            ref="${{ github.ref }}"  # e.g. refs/heads/master
+          else
+            ref="master"  # default to master branch
+          fi
+          mkdir -p "${{ github.workspace }}/.github/matchers"
+          curl https://raw.githubusercontent.com/lizardbyte/copr-ci/${ref}/.github/matchers/rpmlint.json \
+            > "${{ github.workspace }}/.github/matchers/rpmlint.json"
+          echo "::add-matcher::${{ github.workspace }}/.github/matchers/rpmlint.json"
+
+          # repo specific matchers
           if [ -f "${{ github.workspace }}/.github/matchers/copr-ci.json" ]; then
             echo "::add-matcher::${{ github.workspace }}/.github/matchers/copr-ci.json"
           fi

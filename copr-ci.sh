@@ -54,6 +54,9 @@ directories=(
 )
 for dir in "${directories[@]}"; do
   if [ -f "${dir}/${COPR_PACKAGE}.spec" ]; then
+    echo "Found spec file in ${dir}"
+    rpmlint "${dir}/${COPR_PACKAGE}.spec"
+
     mv "${dir}/${COPR_PACKAGE}.spec" "${resultdir}"
     break
   fi
