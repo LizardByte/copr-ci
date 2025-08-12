@@ -71,7 +71,7 @@ jobs:
 
             # if a pull request exit with 0
             if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "SKIP_REMAINING_JOBS=true" >> $GITHUB_OUTPUT
+              echo "SKIP_REMAINING_JOBS=true" >> "${GITHUB_OUTPUT}"
             else
               exit 1
             fi
@@ -119,7 +119,7 @@ jobs:
           for project in "${projects[@]}"; do
             # check if 404 on get package (package does not exist)
             url="${BASE_URL}/package?ownername=${OWNERNAME}&projectname=${project}&packagename=${PACKAGE_NAME}"
-            status_code=$(curl --write-out %{http_code} --silent --output /dev/null $url)
+            status_code=$(curl --write-out '%{http_code}' --silent --output /dev/null "${url}")
 
             if [[ "$status_code" == 404 ]]; then
               echo "Creating package for ${project}..."
@@ -137,7 +137,7 @@ jobs:
               --script-chroot "${chroot}" \
               --name "${PACKAGE_NAME}" \
               --timeout $((60 * ${{ inputs.job_timeout }})) \
-              ${project}
+              "${project}"
 
           done
 
@@ -213,9 +213,11 @@ jobs:
             COPR_PR_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ env.COPR_PR_WH_TOKEN }}/${package}/"
           fi
 
-          echo "BUILD_CHANNEL=${BUILD_CHANNEL}" >> $GITHUB_ENV
-          echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}" >> $GITHUB_ENV
-          echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}" >> $GITHUB_ENV
+          {
+            echo "BUILD_CHANNEL=${BUILD_CHANNEL}"
+            echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
+            echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
+          } >> "${GITHUB_ENV}"
 
           echo "BUILD_CHANNEL=${BUILD_CHANNEL}"
           echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
@@ -286,15 +288,12 @@ jobs:
             url="${entry#*|}"
             set +e
             echo "::group::Logs - ${name}"
-            if [[ "${url}" == *.gz ]]; then
-              curl -fsSL --retry 3 "${url}" | gunzip -c
-            else
-              curl -fsSL --retry 3 "${url}"
-            fi
-            if [ $? -ne 0 ]; then
-              echo "Failed to download logs from ${url}"
-              error=1
-            fi
+            [[ "${url}" == *.gz ]] && \
+              (curl -fsSL --retry 3 "${url}" | gunzip -c) || \
+              curl -fsSL --retry 3 "${url}" || {
+                echo "Failed to download logs from ${url}"
+                error=1
+              }
             echo "::endgroup::"
             set -e
           done
