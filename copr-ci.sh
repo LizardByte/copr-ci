@@ -1,6 +1,7 @@
-#! /bin/sh -x
-
+#!/usr/bin/env bash
+set -x
 set -e
+
 resultdir="${COPR_RESULTDIR}"
 git clone "https://github.com/${COPR_OWNER}/${COPR_PACKAGE}.git" --depth 1
 cd "${COPR_PACKAGE}"
@@ -40,7 +41,7 @@ TAG=$(git tag --points-at HEAD | head -n1)
 if [ -z "$TAG" ]; then
   TAG="0.0.$PR"
 fi
-TAG=$(echo "$TAG" | sed 's/^v//')  # remove v prefix from the tag
+TAG="${TAG#v}"  # remove v prefix from the tag
 echo "TAG=$TAG"
 
 # get the commit
