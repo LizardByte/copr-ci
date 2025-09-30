@@ -147,11 +147,12 @@ jobs:
     if: github.repository_owner == inputs.github_org_owner
     runs-on: ubuntu-latest
     container: fedora:latest
+    environment:
+      name: copr-${{ env.COPR_REPO }}
+      url: ${{ env.ENV_BASE_URL }}/${{ env.COPR_REPO }}/builds/${{ steps.build.outputs.BUILD_ID }}
+    env:
+      ENV_BASE_URL: https://copr.fedorainfracloud.org/coprs/${{ inputs.copr_ownername }}
     timeout-minutes: ${{ inputs.job_timeout }}
-    outputs:
-      BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
-      BUILD_CANCEL: ${{ steps.build.outcome == 'cancelled' }}
-      BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
     steps:
       - name: Install dependencies
         run: |
@@ -203,13 +204,16 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             if [ "${{ github.event.action }}" = "prereleased" ]; then
               BUILD_CHANNEL="beta"
+              COPR_REPO="beta"
               COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}/${package}/"
             elif [ "${{ github.event.action }}" = "released" ]; then
               BUILD_CHANNEL="stable"
+              COPR_REPO="stable"
               COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}/${package}/"
             fi
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
             BUILD_CHANNEL="pulls:pr:${{ github.event.number }}"
+            COPR_REPO="pulls"
             COPR_PR_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ env.COPR_PR_WH_TOKEN }}/${package}/"
           fi
 
@@ -217,11 +221,13 @@ jobs:
             echo "BUILD_CHANNEL=${BUILD_CHANNEL}"
             echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
             echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
+            echo "COPR_REPO=${COPR_REPO}"
           } >> "${GITHUB_ENV}"
 
           echo "BUILD_CHANNEL=${BUILD_CHANNEL}"
           echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
           echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
+          echo "COPR_REPO=${COPR_REPO}"
 
       - name: Build
         id: build
