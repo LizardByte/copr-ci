@@ -51,7 +51,7 @@ echo "COMMIT=$COMMIT"
 # move spec file to the correct location
 directories=(
   "."
-  "./packaging/linux/fedora"
+  "./packaging/linux/copr"
 )
 for dir in "${directories[@]}"; do
   if [[ -f "${dir}/${COPR_PACKAGE}.spec" ]]; then
