@@ -7,10 +7,10 @@ git clone "https://github.com/${COPR_OWNER}/${COPR_PACKAGE}.git" --depth 1
 cd "${COPR_PACKAGE}"
 
 # get info from the webhook payload
-if test -z "$REVISION"; then
+if [[ -z "$REVISION" ]]; then
   # the hook_payload file contains webhook JSON payload (copr creates it for us);
   # it is created only if the build is triggered by Custom webhook.
-  if test -f "$resultdir"/hook_payload; then
+  if [[ -f "$resultdir"/hook_payload ]]; then
     git clone https://github.com/praiskup/copr-ci-tooling \
       "$resultdir/cct" --depth 1
     export PATH="$resultdir/cct:$PATH"
@@ -21,7 +21,7 @@ if test -z "$REVISION"; then
 
     # use jq to get the pr_id from the hook_payload
     PR=$(jq -r '.pr_id // empty' "$resultdir"/hook_payload)
-    if [ -z "$PR" ]; then
+    if [[ -z "$PR" ]]; then
       BRANCH="master"
     else
       BRANCH="pr/${PR}"
@@ -38,7 +38,7 @@ git submodule update --init --recursive
 
 # get the tag of this commit IF it has one
 TAG=$(git tag --points-at HEAD | head -n1)
-if [ -z "$TAG" ]; then
+if [[ -z "$TAG" ]]; then
   TAG="0.0.$PR"
 fi
 TAG="${TAG#v}"  # remove v prefix from the tag
@@ -54,7 +54,7 @@ directories=(
   "./packaging/linux/fedora"
 )
 for dir in "${directories[@]}"; do
-  if [ -f "${dir}/${COPR_PACKAGE}.spec" ]; then
+  if [[ -f "${dir}/${COPR_PACKAGE}.spec" ]]; then
     echo "Found spec file in ${dir}"
     rpmlint "${dir}/${COPR_PACKAGE}.spec"
 
@@ -64,8 +64,8 @@ for dir in "${directories[@]}"; do
 done
 
 # fail if the spec file is not in the resultdir
-if [ ! -f "${resultdir}/${COPR_PACKAGE}.spec" ]; then
-  echo "ERROR: ${COPR_PACKAGE}.spec not found"
+if [[ ! -f "${resultdir}/${COPR_PACKAGE}.spec" ]]; then
+  echo "ERROR: ${COPR_PACKAGE}.spec not found" >&2
   exit 1
 fi
 
