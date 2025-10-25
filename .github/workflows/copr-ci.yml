@@ -39,6 +39,16 @@ on:
         description: 'Copr CLI configuration file. See https://copr.fedorainfracloud.org/api'
         required: true
 
+env:
+  INPUTS_AUTO_UPDATE_PACKAGE: ${{ inputs.auto_update_package }}
+  INPUTS_COPR_PR_WEBHOOK_TOKEN: ${{ inputs.copr_pr_webhook_token }}
+  INPUTS_COPR_OWNERNAME: ${{ inputs.copr_ownername }}
+  INPUTS_GITHUB_ORG_OWNER: ${{ inputs.github_org_owner }}
+  INPUTS_JOB_TIMEOUT: ${{ inputs.job_timeout }}
+  SECRETS_COPR_BETA_WEBHOOK_TOKEN: ${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}
+  SECRETS_COPR_STABLE_WEBHOOK_TOKEN: ${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}
+  SECRETS_COPR_CLI_CONFIG: ${{ secrets.COPR_CLI_CONFIG }}
+
 jobs:
   package-init:
     name: Create/update copr package
@@ -46,18 +56,17 @@ jobs:
     container: fedora:latest
     env:
       BASE_URL: https://copr.fedorainfracloud.org/api_3
-      OWNERNAME: ${{ inputs.copr_ownername }}
       PACKAGE_NAME: ${{ github.event.repository.name }}
       SOURCE_TYPE_TEXT: "custom"
     steps:
       - name: Debug inputs
         run: |
           echo "inputs:"
-          echo "copr_pr_webhook_token: ${{ inputs.copr_pr_webhook_token }}"
-          echo "github_org_owner: ${{ inputs.github_org_owner }}"
-          echo "copr_ownername: ${{ inputs.copr_ownername }}"
-          echo "auto_update_package: ${{ inputs.auto_update_package }}"
-          echo "job_timeout: ${{ inputs.job_timeout }}"
+          echo "copr_pr_webhook_token: ${INPUTS_COPR_PR_WEBHOOK_TOKEN}"
+          echo "github_org_owner: ${INPUTS_GITHUB_ORG_OWNER}"
+          echo "copr_ownername: ${INPUTS_COPR_OWNERNAME}"
+          echo "auto_update_package: ${INPUTS_AUTO_UPDATE_PACKAGE}"
+          echo "job_timeout: ${INPUTS_JOB_TIMEOUT}"
 
       - name: Test secrets
         id: test_secrets
@@ -66,18 +75,18 @@ jobs:
           inputs.auto_update_package == true
         run: |
           # return if secrets.COPR_CLI_CONFIG is empty
-          if [ -z "${{ secrets.COPR_CLI_CONFIG }}" ]; then
+          if [[ -z "${SECRETS_COPR_CLI_CONFIG}" ]]; then
             echo "Copr CLI configuration file is empty. Exiting..."
 
             # if a pull request exit with 0
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [[ "${{ github.event_name }}" = "pull_request" ]]; then
               echo "SKIP_REMAINING_JOBS=true" >> "${GITHUB_OUTPUT}"
             else
               exit 1
             fi
           else
             mkdir -p ~/.config
-            echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
+            echo "${SECRETS_COPR_CLI_CONFIG}" > ~/.config/copr
           fi
 
       - name: Install dependencies
@@ -97,7 +106,7 @@ jobs:
           )
 
           # download the latest copr-ci.sh script
-          if [ "${{ github.repository }}" = "LizardByte/copr-ci" ]; then
+          if [[ "${{ github.repository }}" = "LizardByte/copr-ci" ]]; then
             # use the version from the same ref
             ref="${{ github.ref }}"
           else
@@ -118,7 +127,8 @@ jobs:
 
           for project in "${projects[@]}"; do
             # check if 404 on get package (package does not exist)
-            url="${BASE_URL}/package?ownername=${OWNERNAME}&projectname=${project}&packagename=${PACKAGE_NAME}"
+            url_query="ownername=${INPUTS_COPR_OWNERNAME}&projectname=${project}&packagename=${PACKAGE_NAME}"
+            url="${BASE_URL}/package?${url_query}"
             status_code=$(curl --write-out '%{http_code}' --silent --output /dev/null "${url}")
 
             if [[ "$status_code" == 404 ]]; then
@@ -136,7 +146,7 @@ jobs:
               --script-resultdir "${resultdir}" \
               --script-chroot "${chroot}" \
               --name "${PACKAGE_NAME}" \
-              --timeout $((60 * ${{ inputs.job_timeout }})) \
+              --timeout $((60 * INPUTS_JOB_TIMEOUT)) \
               "${project}"
 
           done
@@ -174,7 +184,7 @@ jobs:
           mkdir -p .github/matchers
 
           # download the latest rpmlint.json matcher
-          if [ ! "${{ github.repository }}" = "LizardByte/copr-ci" ]; then
+          if [[ ! "${{ github.repository }}" = "LizardByte/copr-ci" ]]; then
             # not in copr-ci repo, so download the rpmlint.json
             ref="master"  # default to master branch
             curl \
@@ -186,31 +196,29 @@ jobs:
           echo "::add-matcher::.github/matchers/rpmlint.json"
 
           # repo specific matchers
-          if [ -f ".github/matchers/copr-ci.json" ]; then
+          if [[ -f ".github/matchers/copr-ci.json" ]]; then
             echo "Found copr-ci.json matcher, adding it..."
             echo "::add-matcher::.github/matchers/copr-ci.json"
           fi
 
       - name: Get properties
-        env:
-          COPR_PR_WH_TOKEN: ${{ inputs.copr_pr_webhook_token }}
         run: |
           # package name = repository name
           package=${{ github.event.repository.name }}
-          copr_base="https://copr.fedorainfracloud.org/webhooks/custom-dir/${{ inputs.copr_ownername }}"
+          copr_base="https://copr.fedorainfracloud.org/webhooks/custom-dir/${INPUTS_COPR_OWNERNAME}"
 
           # release and released type
-          if [ "${{ github.event_name }}" = "release" ]; then
-            if [ "${{ github.event.action }}" = "prereleased" ]; then
+          if [[ "${{ github.event_name }}" = "release" ]]; then
+            if [[ "${{ github.event.action }}" = "prereleased" ]]; then
               BUILD_CHANNEL="beta"
-              COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}/${package}/"
-            elif [ "${{ github.event.action }}" = "released" ]; then
+              COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${SECRETS_COPR_BETA_WEBHOOK_TOKEN}/${package}/"
+            elif [[ "${{ github.event.action }}" = "released" ]]; then
               BUILD_CHANNEL="stable"
-              COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}/${package}/"
+              COPR_PUSH_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${SECRETS_COPR_STABLE_WEBHOOK_TOKEN}/${package}/"
             fi
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+          elif [[ "${{ github.event_name }}" = "pull_request" ]]; then
             BUILD_CHANNEL="pulls:pr:${{ github.event.number }}"
-            COPR_PR_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${{ env.COPR_PR_WH_TOKEN }}/${package}/"
+            COPR_PR_WEBHOOK="${copr_base}/${BUILD_CHANNEL}/${INPUTS_COPR_PR_WEBHOOK_TOKEN}/${package}/"
           fi
 
           {
@@ -243,7 +251,7 @@ jobs:
           github.secret_source
         run: |
           mkdir -p ~/.config
-          echo "${{ secrets.COPR_CLI_CONFIG }}" > ~/.config/copr
+          echo "${SECRETS_COPR_CLI_CONFIG}" > ~/.config/copr
 
           copr-cli \
             cancel \
@@ -255,7 +263,7 @@ jobs:
           steps.build.outcome != 'skipped'
         run: |
           package=${{ github.event.repository.name }}
-          base_url="https://download.copr.fedorainfracloud.org/results/${{ inputs.copr_ownername }}/${BUILD_CHANNEL}"
+          base_url="https://download.copr.fedorainfracloud.org/results/${INPUTS_COPR_OWNERNAME}/${BUILD_CHANNEL}"
 
           # get chroots and prefixed build_id
           build_url="https://copr.fedorainfracloud.org/api_3/build/${{ steps.build.outputs.BUILD_ID }}"
