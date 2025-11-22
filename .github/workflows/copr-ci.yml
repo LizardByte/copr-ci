@@ -173,7 +173,7 @@ jobs:
             zip
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set git safe directory
         run: git config --global --add safe.directory '*'
