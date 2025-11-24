@@ -75,4 +75,4 @@ sed -i "s|%global branch 0|%global branch ${BRANCH}|" "${resultdir}"/*.spec
 sed -i "s|%global commit 0|%global commit ${COMMIT}|" "${resultdir}"/*.spec
 
 # create a tarball of the source code
-tar -czf "${resultdir}/tarball.tar.gz" .
+tar -czf "${resultdir}/tarball.tar.gz" --exclude-vcs .
