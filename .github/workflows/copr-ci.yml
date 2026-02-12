@@ -173,7 +173,7 @@ jobs:
             zip
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
       - name: Set git safe directory
         run: git config --global --add safe.directory '*'
@@ -322,7 +322,7 @@ jobs:
       - name: Setup gh actions artifact client
         id: download-build-client
         if: steps.download-build.outcome == 'success'
-        uses: lhotari/gh-actions-artifact-client@v2
+        uses: lhotari/gh-actions-artifact-client@ef03990878cb292d789ee6c36b5bbc8369aa30ed  # v2
 
       - name: Upload artifacts
         if: steps.download-build-client.outcome == 'success'
