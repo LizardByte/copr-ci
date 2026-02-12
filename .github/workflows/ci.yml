@@ -1,7 +1,6 @@
 ---
 name: CI Copr
-permissions:
-  contents: read
+permissions: {}
 
 on:
   pull_request:
@@ -27,6 +26,8 @@ jobs:
   call-copr-ci:
     uses: ./.github/workflows/copr-ci.yml
     if: github.event_name == 'pull_request' || github.event_name == 'release'  # not push event
+    permissions:
+      contents: read
     secrets:
       COPR_BETA_WEBHOOK_TOKEN: ${{ secrets.COPR_BETA_WEBHOOK_TOKEN }}
       COPR_STABLE_WEBHOOK_TOKEN: ${{ secrets.COPR_STABLE_WEBHOOK_TOKEN }}

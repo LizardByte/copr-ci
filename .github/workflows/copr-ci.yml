@@ -1,7 +1,6 @@
 ---
 name: CI Copr Call
-permissions:
-  contents: read
+permissions: {}
 
 on:
   workflow_call:
@@ -52,12 +51,14 @@ env:
 jobs:
   package-init:
     name: Create/update copr package
-    runs-on: ubuntu-latest
     container: fedora:latest
     env:
       BASE_URL: https://copr.fedorainfracloud.org/api_3
       PACKAGE_NAME: ${{ github.event.repository.name }}
       SOURCE_TYPE_TEXT: "custom"
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
     steps:
       - name: Debug inputs
         run: |
@@ -113,7 +114,7 @@ jobs:
             ref="master"  # default to master branch
           fi
           curl \
-            -fsSL \
+            -fsS \
             --retry 3 \
             "https://raw.githubusercontent.com/lizardbyte/copr-ci/${ref}/copr-ci.sh" \
             -o copr-ci.sh
@@ -153,15 +154,17 @@ jobs:
 
   build:
     name: Copr build
-    needs: package-init
     if: github.repository_owner == inputs.github_org_owner
-    runs-on: ubuntu-latest
     container: fedora:latest
-    timeout-minutes: ${{ inputs.job_timeout }}
+    needs: package-init
     outputs:
       BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
       BUILD_CANCEL: ${{ steps.build.outcome == 'cancelled' }}
       BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.job_timeout }}
+    permissions:
+      contents: read
     steps:
       - name: Install dependencies
         run: |
@@ -188,7 +191,7 @@ jobs:
             # not in copr-ci repo, so download the rpmlint.json
             ref="master"  # default to master branch
             curl \
-              -fsSL \
+              -fsS \
               --retry 3 \
               "https://raw.githubusercontent.com/lizardbyte/copr-ci/${ref}/.github/matchers/rpmlint.json" \
               -o ".github/matchers/rpmlint.json"
@@ -235,7 +238,7 @@ jobs:
         id: build
         run: |
           curl \
-            -fsSL \
+            -fsS \
             --retry 3 \
             "https://raw.githubusercontent.com/reenignearcher/copr-ci-tooling/patch-1/copr-gh-actions-submit" > submit
             # TODO: https://github.com/praiskup/copr-ci-tooling/pull/1
@@ -267,7 +270,7 @@ jobs:
 
           # get chroots and prefixed build_id
           build_url="https://copr.fedorainfracloud.org/api_3/build/${{ steps.build.outputs.BUILD_ID }}"
-          data=$(curl -fsSL --retry 3 "${build_url}")
+          data=$(curl -fsS --retry 3 "${build_url}")
 
           # Extract build_id from source_package.url (matches the last path segment after 'srpm-builds/')
           build_id=$(echo "${data}" | jq -r '.source_package.url' | sed -E 's#.*/srpm-builds/([0-9]+)/.*#\1#')
