@@ -390,8 +390,9 @@ jobs:
           cd artifacts
 
           for chroot in ${CHROOTS}; do
-            echo "Downloading artifacts for chroot: ${chroot}"
+            echo "==> Downloading artifacts for chroot: ${chroot}"
             copr-cli \
+              --debug \
               download-build \
               --chroot "${chroot}" \
               --dest . \
