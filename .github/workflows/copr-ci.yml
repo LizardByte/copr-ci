@@ -162,9 +162,11 @@ jobs:
     needs: package-init
     outputs:
       BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
+      BUILD_ID_ALT: ${{ steps.chroots.outputs.BUILD_ID_ALT }}
       BUILD_CHANNEL: ${{ steps.get-properties.outputs.BUILD_CHANNEL }}
       BUILD_CANCEL: ${{ steps.build.outcome == 'cancelled' }}
       BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
+      CHROOTS: ${{ steps.chroots.outputs.CHROOTS }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -237,6 +239,32 @@ jobs:
             bash submit
           fi
 
+      - name: Get chroots
+        id: chroots
+        if: always()
+        env:
+          BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
+        run: |
+          # get chroots and prefixed build_id
+          build_url="https://copr.fedorainfracloud.org/api_3/build/${BUILD_ID}"
+          data=$(curl -fsS --retry 3 "${build_url}")
+
+          # Extract build_id from source_package.url (matches the last path segment after 'srpm-builds/')
+          build_id_alt=$(echo "${data}" | jq -r '.source_package.url' | sed -E 's#.*/srpm-builds/([0-9]+)/.*#\1#')
+          echo "build_id_alt: ${build_id_alt}"
+
+          # Extract chroots
+          chroots=$(echo "${data}" | jq -r '.chroots[]')
+          echo "chroots:"
+          echo "${chroots}"
+
+          {
+            echo "BUILD_ID_ALT=${build_id_alt}"
+            echo "CHROOTS<<EOF"  # use heredoc for multiline output
+            echo "${chroots}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Cancel Copr build
         if: >-
           always() &&
@@ -259,6 +287,8 @@ jobs:
     env:
       BUILD_CHANNEL: ${{ needs.build.outputs.BUILD_CHANNEL }}
       BUILD_ID: ${{ needs.build.outputs.BUILD_ID }}
+      BUILD_ID_ALT: ${{ needs.build.outputs.BUILD_ID_ALT }}
+      CHROOTS: ${{ needs.build.outputs.CHROOTS }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -300,29 +330,16 @@ jobs:
           package=${PACKAGE_NAME}
           base_url="https://download.copr.fedorainfracloud.org/results/${INPUTS_COPR_OWNERNAME}/${BUILD_CHANNEL}"
 
-          # get chroots and prefixed build_id
-          build_url="https://copr.fedorainfracloud.org/api_3/build/${BUILD_ID}"
-          data=$(curl -fsS --retry 3 "${build_url}")
-
-          # Extract build_id from source_package.url (matches the last path segment after 'srpm-builds/')
-          build_id_alt=$(echo "${data}" | jq -r '.source_package.url' | sed -E 's#.*/srpm-builds/([0-9]+)/.*#\1#')
-          echo "build_id_alt: ${build_id_alt}"
-
-          # Extract chroots
-          chroots=$(echo "${data}" | jq -r '.chroots[]')
-          echo "chroots:"
-          echo "${chroots}"
-
           # Array of "name|url" pairs
           logs=(
-            "source_builder|${base_url}/srpm-builds/${build_id_alt}/builder-live.log.gz"
-            "source_backend|${base_url}/srpm-builds/${build_id_alt}/backend.log.gz"
+            "source_builder|${base_url}/srpm-builds/${BUILD_ID_ALT}/builder-live.log.gz"
+            "source_backend|${base_url}/srpm-builds/${BUILD_ID_ALT}/backend.log.gz"
             "import|https://copr-dist-git.fedorainfracloud.org/per-task-logs/${BUILD_ID}.log"
           )
 
-          for chroot in $chroots; do
-            logs+=("builder_${chroot}|${base_url}/${chroot}/${build_id_alt}-${package}/builder-live.log.gz")
-            logs+=("backend_${chroot}|${base_url}/${chroot}/${build_id_alt}-${package}/backend.log.gz")
+          for chroot in ${CHROOTS}; do
+            logs+=("builder_${chroot}|${base_url}/${chroot}/${BUILD_ID_ALT}-${package}/builder-live.log.gz")
+            logs+=("backend_${chroot}|${base_url}/${chroot}/${BUILD_ID_ALT}-${package}/backend.log.gz")
           done
 
           error=0
@@ -349,6 +366,7 @@ jobs:
     container: fedora:latest
     env:
       BUILD_ID: ${{ needs.build.outputs.BUILD_ID }}
+      CHROOTS: ${{ needs.build.outputs.CHROOTS }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -361,26 +379,31 @@ jobs:
             nodejs \
             zip
 
-      - name: Download build
+      - name: Setup gh actions artifact client
+        id: download-build-client
+        uses: lhotari/gh-actions-artifact-client@ef03990878cb292d789ee6c36b5bbc8369aa30ed  # v2
+
+      - name: Download and upload artifacts
         id: download-build
         run: |
           mkdir -p artifacts
-          copr-cli \
-            download-build \
-            --dest . \
-            --rpms \
-            "${BUILD_ID}"
+          cd artifacts
 
-      - name: Setup gh actions artifact client
-        id: download-build-client
-        if: steps.download-build.outcome == 'success'
-        uses: lhotari/gh-actions-artifact-client@ef03990878cb292d789ee6c36b5bbc8369aa30ed  # v2
+          for chroot in ${CHROOTS}; do
+            echo "Downloading artifacts for chroot: ${chroot}"
+            copr-cli \
+              download-build \
+              --chroot "${chroot}" \
+              --dest . \
+              --rpms \
+              "${BUILD_ID}"
 
-      - name: Upload artifacts
-        if: steps.download-build-client.outcome == 'success'
-        run: |
-          find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
-            name=build-$(basename "$file")
-            echo "Uploading $name, file: $file"
-            zip -j - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
+            find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
+              name=build-$(basename "$file")
+              echo "Uploading $name, file: $file"
+              zip -j - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
+
+              # empty artifacts directory to free up runner space
+              rm -rf ./*
+            done
           done
