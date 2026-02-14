@@ -167,6 +167,7 @@ jobs:
       BUILD_CANCEL: ${{ steps.build.outcome == 'cancelled' }}
       BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
       CHROOTS: ${{ steps.chroots.outputs.CHROOTS }}
+      CHROOTS_MATRIX: ${{ steps.chroots.outputs.CHROOTS_MATRIX }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -258,11 +259,16 @@ jobs:
           echo "chroots:"
           echo "${chroots}"
 
+          # Create matrix JSON array
+          chroots_matrix=$(echo "${chroots}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "chroots_matrix: ${chroots_matrix}"
+
           {
             echo "BUILD_ID_ALT=${build_id_alt}"
             echo "CHROOTS<<EOF"  # use heredoc for multiline output
             echo "${chroots}"
             echo "EOF"
+            echo "CHROOTS_MATRIX=${chroots_matrix}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Cancel Copr build
@@ -361,12 +367,16 @@ jobs:
           exit ${error}
 
   artifacts:
-    name: Artifacts
+    name: Artifacts (${{ matrix.chroot }})
     if: always() && needs.build.outputs.BUILD_SUCCESS == 'true'
     container: fedora:latest
+    strategy:
+      max-parallel: 2
+      matrix:
+        chroot: ${{ fromJson(needs.build.outputs.CHROOTS_MATRIX) }}
     env:
       BUILD_ID: ${{ needs.build.outputs.BUILD_ID }}
-      CHROOTS: ${{ needs.build.outputs.CHROOTS }}
+      CHROOT: ${{ matrix.chroot }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -389,22 +399,25 @@ jobs:
           mkdir -p artifacts
           cd artifacts
 
-          for chroot in ${CHROOTS}; do
-            echo "==> Downloading artifacts for chroot: ${chroot}"
-            copr-cli \
-              --debug \
-              download-build \
-              --chroot "${chroot}" \
-              --dest . \
-              --rpms \
-              "${BUILD_ID}"
+          echo "==> Downloading artifacts for chroot: ${CHROOT}"
+          copr-cli \
+            --debug \
+            download-build \
+            --chroot "${CHROOT}" \
+            --dest . \
+            --rpms \
+            "${BUILD_ID}"
 
-            find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
-              name=build-$(basename "$file")
-              echo "Uploading $name, file: $file"
-              zip -j - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
-
-              # empty artifacts directory to free up runner space
-              rm -rf ./*
-            done
+          find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
+            name=build-$(basename "$file")
+            echo "Uploading $name, file: $file"
+            zip -j - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
           done
+
+  conclude:
+    needs: artifacts
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conclude
+        run: echo "All tests passed"
