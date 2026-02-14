@@ -159,6 +159,26 @@ jobs:
     name: Build
     if: github.repository_owner == inputs.github_org_owner
     container: fedora:latest
+    environment:
+      name: >-
+        ${{
+          github.event_name == 'release' &&
+          format('copr-{0}', github.event.action == 'prereleased' && 'beta' || 'stable') ||
+          null
+        }}
+      url: >-
+        ${{
+          github.event_name == 'release' &&
+          format(
+            'https://copr.fedorainfracloud.org/coprs/{0}/{1}/builds/{2}',
+            inputs.copr_ownername,
+            github.event.action == 'prereleased' && 'beta' || 'stable',
+            steps.build.outputs.BUILD_ID
+          ) ||
+          null
+        }}
+    env:
+      ENV_BASE_URL: https://copr.fedorainfracloud.org/coprs/${{ inputs.copr_ownername }}
     needs: package-init
     outputs:
       BUILD_ID: ${{ steps.build.outputs.BUILD_ID }}
@@ -168,9 +188,9 @@ jobs:
       BUILD_SUCCESS: ${{ steps.build.outcome == 'success' }}
       CHROOTS: ${{ steps.chroots.outputs.CHROOTS }}
       CHROOTS_MATRIX: ${{ steps.chroots.outputs.CHROOTS_MATRIX }}
-    runs-on: ubuntu-latest
     permissions:
       contents: read
+    runs-on: ubuntu-latest
     steps:
       - name: Install dependencies
         run: |
@@ -216,7 +236,7 @@ jobs:
           echo "COPR_PUSH_WEBHOOK=${COPR_PUSH_WEBHOOK}"
           echo "COPR_PR_WEBHOOK=${COPR_PR_WEBHOOK}"
 
-          # Output BUILD_CHANNEL for other jobs
+          # Output for other jobs
           echo "BUILD_CHANNEL=${BUILD_CHANNEL}" >> "${GITHUB_OUTPUT}"
 
       - name: Build
