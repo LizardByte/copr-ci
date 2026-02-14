@@ -391,7 +391,7 @@ jobs:
     if: always() && needs.build.outputs.BUILD_SUCCESS == 'true'
     container: fedora:latest
     strategy:
-      max-parallel: 2
+      fail-fast: false
       matrix:
         chroot: ${{ fromJson(needs.build.outputs.CHROOTS_MATRIX) }}
     env:
