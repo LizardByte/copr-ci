@@ -170,7 +170,7 @@ jobs:
         ${{
           github.event_name == 'release' &&
           format(
-            'https://copr.fedorainfracloud.org/coprs/{0}/{1}/builds/{2}',
+            'https://copr.fedorainfracloud.org/coprs/{0}/{1}/build/{2}',
             inputs.copr_ownername,
             github.event.action == 'prereleased' && 'beta' || 'stable',
             steps.build.outputs.BUILD_ID
