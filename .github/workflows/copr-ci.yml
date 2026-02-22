@@ -428,9 +428,13 @@ jobs:
             --rpms \
             "${BUILD_ID}"
 
+          # Log the download size
+          download_size=$(du -sh "${CHROOT}" 2>/dev/null | cut -f1 || echo "unknown")
+          echo "==> Download size for chroot ${CHROOT}: ${download_size}"
+
           find . -type f -name "*.rpm" ! -name "*.src.rpm" | while read -r file; do
             name=build-$(basename "$file")
-            echo "Uploading $name, file: $file"
+            echo "==> Uploading $name, file: $file"
             zip -j - "$file" | gh-actions-artifact-client.js upload "${name}" --retentionDays=7
           done
 
