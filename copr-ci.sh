@@ -33,8 +33,43 @@ else
   git checkout "$REVISION"
 fi
 
-# initialize the submodules
-git submodule update --init --recursive
+# read optional exclusions from .copr-ci config file
+# each non-empty, non-comment line is treated as a submodule path or directory
+# to exclude (relative to the repo root, e.g. "third-party/build-deps")
+EXCLUDED_PATHS=()
+if [[ -f ".copr-ci" ]]; then
+  echo "Found .copr-ci config file, reading exclusions..."
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    EXCLUDED_PATHS+=("$line")
+    echo "  Excluding: $line"
+  done < ".copr-ci"
+fi
+
+# initialize the submodules, skipping any excluded paths
+if [[ ${#EXCLUDED_PATHS[@]} -gt 0 ]]; then
+  # get all top-level submodule paths, then init only the ones not excluded
+  mapfile -t TOP_SUBMODULES < <(git submodule status | awk '{print $2}')
+
+  for submodule in "${TOP_SUBMODULES[@]}"; do
+    skip=false
+    for excluded in "${EXCLUDED_PATHS[@]}"; do
+      # match exact path or any path that starts with the excluded prefix
+      if [[ "$submodule" == "$excluded" || "$submodule" == "$excluded/"* ]]; then
+        skip=true
+        break
+      fi
+    done
+    if [[ "$skip" == false ]]; then
+      git submodule update --init --recursive --depth 1 -- "$submodule"
+    else
+      echo "Skipping submodule: $submodule"
+    fi
+  done
+else
+  git submodule update --init --recursive --depth 1
+fi
 
 # get the tag of this commit IF it has one
 TAG=$(git tag --points-at HEAD | head -n1)
@@ -74,5 +109,9 @@ sed -i "s|%global build_version 0|%global build_version ${TAG}|" "${resultdir}"/
 sed -i "s|%global branch 0|%global branch ${BRANCH}|" "${resultdir}"/*.spec
 sed -i "s|%global commit 0|%global commit ${COMMIT}|" "${resultdir}"/*.spec
 
-# create a tarball of the source code
-tar -czf "${resultdir}/tarball.tar.gz" .
+# create a tarball of the source code, excluding any configured paths
+TAR_EXCLUDE_ARGS=()
+for path in "${EXCLUDED_PATHS[@]}"; do
+  TAR_EXCLUDE_ARGS+=("--exclude=./${path}")
+done
+tar -czf "${resultdir}/tarball.tar.gz" "${TAR_EXCLUDE_ARGS[@]}" .
