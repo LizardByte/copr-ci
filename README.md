@@ -67,3 +67,22 @@ You can replicate this in your own org, by following the examples here.
 
    Version: %{build_version}
    ```
+
+5. Optionally, add a `.copr-ci` file to the root of your repo to exclude submodules or directories from the
+   build. This is useful for reducing the size of the source tarball when large submodules are not needed for
+   packaging. Each non-empty, non-comment line is treated as a path relative to the repo root to exclude.
+
+   ```
+   # .copr-ci - paths to exclude from the copr build tarball
+   # Lines starting with '#' are comments and are ignored.
+
+   # exclude an entire submodule
+   third-party/build-deps
+
+   # exclude a specific subdirectory inside a submodule
+   third-party/build-deps/third-party/FFmpeg/AMF/Thirdparty
+   ```
+
+   Excluded paths are:
+   - **Not initialized** as submodules (never cloned, saving time and bandwidth).
+   - **Excluded** from the generated source tarball passed to rpmbuild.
