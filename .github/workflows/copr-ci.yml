@@ -411,7 +411,7 @@ jobs:
 
       - name: Setup gh actions artifact client
         id: download-build-client
-        uses: lhotari/gh-actions-artifact-client@ef03990878cb292d789ee6c36b5bbc8369aa30ed  # v2
+        uses: lhotari/gh-actions-artifact-client@56842cf1c6ec1713e7d7c9eb567613bd39e5819e  # v1
 
       - name: Download and upload artifacts
         id: download-build
