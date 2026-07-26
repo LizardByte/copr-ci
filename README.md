@@ -1,4 +1,20 @@
-# copr-ci
+<div align="center">
+  <img
+    src="https://raw.githubusercontent.com/LizardByte/.github/refs/heads/master/branding/logos/logo.svg"
+    alt="LizardByte icon"
+    width="256"
+  />
+  <h1 align="center">copr-ci</h1>
+  <h4 align="center">Copr automation scripts for CI.</h4>
+</div>
+
+<div align="center">
+  <a href="https://github.com/LizardByte/copr-ci/actions/workflows/ci.yml?query=branch%3Amaster"><img src="https://img.shields.io/github/actions/workflow/status/lizardbyte/copr-ci/ci.yml.svg?branch=master&label=CI%20build&logo=github&style=for-the-badge" alt="GitHub Workflow Status (CI)"></a>
+  <a href="https://sonarcloud.io/project/overview?id=LizardByte_copr-ci"><img src="https://img.shields.io/sonar/quality_gate/LizardByte_copr-ci.svg?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud&label=sonarcloud" alt="SonarCloud"></a>
+</div>
+
+## Overview
+
 Copr automation scripts for CI. This is meant to be used by LizardByte CI/CD pipeline.
 
 ## Usage
