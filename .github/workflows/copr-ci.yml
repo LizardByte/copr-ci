@@ -388,7 +388,7 @@ jobs:
 
   artifacts:
     name: Artifacts (${{ matrix.chroot }})
-    if: always() && needs.build.outputs.BUILD_SUCCESS == 'true'
+    if: always() && needs.build.outputs.CHROOTS_MATRIX != ''
     container: fedora:latest
     strategy:
       fail-fast: false
@@ -439,9 +439,22 @@ jobs:
           done
 
   conclude:
-    needs: artifacts
+    if: always() && needs.build.result != 'skipped'
+    needs:
+      - artifacts
+      - build
     permissions: {}
     runs-on: ubuntu-latest
     steps:
       - name: Conclude
-        run: echo "All tests passed"
+        env:
+          ARTIFACTS_RESULT: ${{ needs.artifacts.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [[ "${BUILD_RESULT}" != "success" || "${ARTIFACTS_RESULT}" != "success" ]]; then
+            echo "Copr build result: ${BUILD_RESULT}"
+            echo "Artifact download result: ${ARTIFACTS_RESULT}"
+            exit 1
+          fi
+
+          echo "All tests passed"
